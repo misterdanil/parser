@@ -12,6 +12,7 @@ public class Resource {
 	private Map<String, String> attributes;
 	private List<Review> reviews;
 	private Integer averageScore;
+	private Map<String, String> colors;
 
 	public Resource(String id, String link, String name) {
 		this.id = id;
@@ -33,6 +34,10 @@ public class Resource {
 
 	public Map<String, String> getAttributes() {
 		return attributes;
+	}
+
+	public boolean hasAttribute(String key) {
+		return attributes.containsKey(key);
 	}
 
 	public void addAttribute(String key, String value) {
@@ -58,6 +63,24 @@ public class Resource {
 
 	public void setAverageScore(Integer averageScore) {
 		this.averageScore = averageScore;
+	}
+
+	public Map<String, String> getColors() {
+		if (colors == null) {
+			colors = new HashMap<>();
+		}
+		return colors;
+	}
+
+	public void setColors(Map<String, String> colors) {
+		this.colors = colors;
+	}
+
+	@Override
+	public String toString() {
+		return "name=" + name + "\nbrand=" + attributes.get("brand") + "\nmodel=" + attributes.get("model") + "\ncolor="
+				+ colors.toString() + "\n";
+
 	}
 
 }

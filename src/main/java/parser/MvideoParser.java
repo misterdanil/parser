@@ -1,44 +1,34 @@
 package parser;
 
 import java.io.IOException;
-
-
-import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
-import java.net.ProtocolException;
 import java.net.URL;
-import java.net.http.HttpRequest;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.openqa.selenium.By;
 import org.openqa.selenium.PageLoadStrategy;
 import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.devtools.DevTools;
 import org.openqa.selenium.devtools.v109.network.Network;
 import org.openqa.selenium.devtools.v109.network.model.RequestId;
-import org.openqa.selenium.support.ui.ExpectedCondition;
-import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectReader;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.gargoylesoftware.htmlunit.BrowserVersion;
@@ -47,7 +37,6 @@ import com.gargoylesoftware.htmlunit.HttpMethod;
 import com.gargoylesoftware.htmlunit.Page;
 import com.gargoylesoftware.htmlunit.WebClient;
 import com.gargoylesoftware.htmlunit.WebRequest;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
 
 import model.FrequencyMeasure;
 import model.MemoryMeasure;
@@ -116,14 +105,21 @@ public class MvideoParser implements Parser {
 
 	private final ObjectMapper mapper = new ObjectMapper();
 
+	private final IsFoundWrap wrap = new IsFoundWrap();
+	private final StringBuilder builder = new StringBuilder();
+
 	private List<JsonNode> attributes;
 
-	Long cur = null;
+	private WebClient webClient = getWebClient();
+	private ChromeDriver webDriver = null;
+
+	public MvideoParser() {
+		createWebDriver();
+	}
 
 	@Override
 	public Resource getResource(String link) {
 		long a = System.currentTimeMillis();
-		WebClient webClient = getWebClient();
 
 		webClient.addRequestHeader("accept", "application/json");
 		String content;
@@ -148,6 +144,10 @@ public class MvideoParser implements Parser {
 
 		String id = body.path("productId").asText(null);
 		String name = body.path("name").asText(null);
+		name = name.replaceAll("\\s/\\s", "/");
+
+		String[] info = getUniqueInfo(name);
+
 		Resource resource = new Resource(id, link, name);
 
 		String images = body.path("images").toPrettyString();
@@ -163,8 +163,9 @@ public class MvideoParser implements Parser {
 
 		JsonNode all = body.get("properties").get("all");
 
-		resource.addAttribute("brand", body.path("brandName").asText(null));
-		resource.addAttribute("model", body.path("modelName").asText(null));
+		resource.addAttribute("brand", info[0]);
+		resource.addAttribute("model", info[1]);
+		resource.getColors().put(info[2], link);
 
 		attributes = body.get("properties").get("all").findParents("id");
 
@@ -173,13 +174,266 @@ public class MvideoParser implements Parser {
 		return resource;
 	}
 
-	private WebClient getWebClient() {
+	public String[] getUniqueInfo(String text) {
+		Pattern p = Pattern.compile(
+				"(^Смартфон) ([^\\s]*) (.+?(?= \\w*/?\\w*NFC)) ([^\\s]*) (\\w*[/+]?\\w*(GB|Gb|)?) (?<color>.*$)");
+		Matcher m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part6 = m.group("color");
+
+			return new String[] { part2, part3, part6 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*[/+]?\\w*GB)) ([^\\s]*) (.+?(?= \\()) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part6 = m.group(6);
+			if (part6.matches("^\\([\\w-/ ]*\\)[ а-я]*$")) {
+				part6 = m.group(5);
+			}
+
+			return new String[] { part2, part3, part6 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*[/+]?\\w*TB)) ([^\\s]*) (.+?(?= \\()) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part6 = m.group(6);
+			if (part6.matches("^\\([\\w-/ ]*\\)[ а-я]*$")) {
+				part6 = m.group(5);
+			}
+
+			return new String[] { part2, part3, part6 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*[/+]?\\w*GB)) (.+?(?= \\()) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part6 = m.group(6);
+			if (part6.matches("^\\([\\w-/ ]*\\)[ а-я]*$")) {
+				part6 = m.group(5);
+			}
+
+			return new String[] { part2, part3, part6 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*[/+]?\\w*TB)) (.+?(?= \\()) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part6 = m.group(6);
+			if (part6.matches("^\\([\\w-/ ]*\\)[ а-я]*$")) {
+				part6 = m.group(5);
+			}
+
+			return new String[] { part2, part3, part6 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\()) ([^\\s]*) (\\w*[/+]\\w*Gb) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part6 = m.group(6);
+
+			return new String[] { part2, part3, part6 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\()) ([^\\s]*) (\\w*[/+]\\w*Tb) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part6 = m.group(6);
+
+			return new String[] { part2, part3, part6 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*[/+]?\\w*Gb)) (.+?(?= \\()) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+			if (part5.matches("^\\([\\w-/ ]*\\)[ а-я]*$")) {
+				part5 = m.group(6);
+			}
+
+			return new String[] { part2, part3, part5 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*[/+]?\\w*Tb)) (.+?(?= \\()) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+			if (part5.matches("^\\([\\w-/ ]*\\)[ а-я]*$")) {
+				part5 = m.group(6);
+			}
+
+			return new String[] { part2, part3, part5 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*/?\\w*Gb)) ([^\\s]*) (.+?(?= \\()) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+			if (part5.matches("^\\([\\w-/ ]*\\)[ а-я]*$")) {
+				part5 = m.group(6);
+			}
+
+			return new String[] { part2, part3, part5 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*/?\\w*Tb)) ([^\\s]*) (.+?(?= \\()) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+			if (part5.matches("^\\([\\w-/ ]*\\)[ а-я]*$")) {
+				part5 = m.group(6);
+			}
+
+			return new String[] { part2, part3, part5 };
+		}
+
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*/?\\w*GB)) ([^\\s]*) (\\d+\\w*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part6 = m.group(6);
+
+			return new String[] { part2, part3, part6 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*/?\\w*TB)) ([^\\s]*) (\\d+\\w*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part6 = m.group(6);
+
+			return new String[] { part2, part3, part6 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*[/+]?\\w*GB)) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+
+			return new String[] { part2, part3, part5 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*[/+]?\\w*TB)) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+
+			return new String[] { part2, part3, part5 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*[/+]?\\w*Gb)) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+
+			return new String[] { part2, part3, part5 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*[/+]?\\w*Tb)) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+
+			return new String[] { part2, part3, part5 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\(\\d+[/+]?\\d+\\))) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+
+			return new String[] { part2, part3, part5 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\d+[/+]?\\d+)) ([^\\s]*) (.+?(?= \\()) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+
+			return new String[] { part2, part3, part5 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\w*[/+]?\\w*G)) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+
+			return new String[] { part2, part3, part5 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\()) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+
+			return new String[] { part2, part3, part5 };
+		}
+		p = Pattern.compile("(^Смартфон) ([^\\s]*) (.+?(?= \\d+[/+]?\\d+)) ([^\\s]*) (.*$)");
+		m = p.matcher(text);
+		if (m.matches()) {
+			String part2 = m.group(2);
+			String part3 = m.group(3);
+			String part5 = m.group(5);
+
+			return new String[] { part2, part3, part5 };
+		}
+		System.out.println("Couldn't parse " + text);
+		return null;
+	}
+
+	@Override
+	public List<String> getLinks(String link, int page) {
+		link += "?page=" + page;
+
+//		WebClient webClient = getWebClient();
+		int offset = (page - 1) * 24;
+
+		link += "&categoryId=" + 205 + "&offset=" + offset + "&limit=24";
+
+		webClient.addRequestHeader("accept", "application/json");
+		String content;
+		try {
+			content = webClient.getPage(link).getWebResponse().getContentAsString();
+		} catch (IOException e) {
+			throw new RuntimeException(String.format(
+					"Exception occurred while getting resources by link '%s'. Couldn't get response body", link), e);
+		}
+
+		List<String> productIds = getProductIds(content);
+
+		return productIds;
+
+	}
+
+	public WebClient getWebClient() {
 		long a = System.currentTimeMillis();
 		WebClient webClient = new WebClient(BrowserVersion.FIREFOX);
 		webClient.getOptions().setJavaScriptEnabled(true);
 		webClient.getOptions().setRedirectEnabled(true);
 		webClient.getOptions().setThrowExceptionOnScriptError(false);
-//		webClient.getOptions().setThrowExceptionOnFailingStatusCode(false);
+		webClient.getOptions().setThrowExceptionOnFailingStatusCode(false);
 
 		String mvideoUrl = "https://www.mvideo.ru";
 
@@ -443,58 +697,27 @@ public class MvideoParser implements Parser {
 		}
 	}
 
-	public class Tt extends Thread {
-		private DevTools d;
-		private RequestId[] rid;
-
-		public Tt(DevTools db, RequestId[] i) {
-			d = db;
-			rid = i;
-		}
-
-		@Override
-		public void run() {
-			d.addListener(Network.responseReceived(), responseReceived -> {
-				rid[0] = responseReceived.getRequestId();
-				String url = responseReceived.getResponse().getUrl();
-				int status = responseReceived.getResponse().getStatus();
-				String type = responseReceived.getType().toJson();
-				String headers = responseReceived.getResponse().getHeaders().toString();
-				System.out.println(url);
-				if (url.equals("https://www.mvideo.ru/bff/product-details/list")) {
-					String responseBody = d.send(Network.getResponseBody(rid[0])).getBody();
-//					System.out.println("yes");
-					System.out.println(responseBody);
-//					System.out.println(System.currentTimeMillis() - a);
-//					webDriver.quit();
-				}
-			});
-		}
-
-	}
-
 	private class IsFoundWrap {
 		private boolean isFound;
 	}
 
-	@Override
-	public List<Resource> getResources(String link, int page) {
-		link += "?page=" + page;
-
+	public void createWebDriver() {
+		if (webDriver != null) {
+			webDriver.quit();
+		}
 		ChromeOptions options = new ChromeOptions();
 		options.addArguments("disable-blink-features=AutomationControlled", "--headless",
 				"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
 				"start-maximized", "excludeSwitches=enable-automation", "useAutomationExtension=False",
 				"devtools.jsonview.enabled=false");
-		long a = System.currentTimeMillis();
-		ChromeDriver webDriver = new ChromeDriver(options);
+		webDriver = new ChromeDriver(options);
+		System.setProperty("webdriver.chrome.silentOutput", "true");
+		java.util.logging.Logger.getLogger("org.openqa.selenium").setLevel(Level.OFF);
+
 		DevTools devTools = webDriver.getDevTools();
 		devTools.createSession();
 		devTools.send(Network.clearBrowserCache());
 		devTools.send(Network.setCacheDisabled(true));
-
-		IsFoundWrap wrap = new IsFoundWrap();
-		StringBuilder builder = new StringBuilder();
 
 		final RequestId[] requestIds = new RequestId[1];
 		devTools.send(Network.enable(Optional.empty(), Optional.empty(), Optional.of(100000000)));
@@ -504,10 +727,24 @@ public class MvideoParser implements Parser {
 			if (url.equals("https://www.mvideo.ru/bff/product-details/list")) {
 				builder.append(devTools.send(Network.getResponseBody(requestIds[0])).getBody());
 				wrap.isFound = true;
-				webDriver.quit();
+				System.out.println("Found");
 			}
 		});
-		webDriver.get(link);
+
+		webDriver.get(HOME_LINK);
+	}
+
+	public void finishWebDriver() {
+		webDriver.quit();
+		webDriver = null;
+	}
+
+	@Override
+	public List<Resource> getResources(String link, int page) {
+		link += "&page=" + page;
+
+		webDriver.navigate().to(link);
+		System.out.println("Navigate to " + link);
 
 		WebDriverWait wdw = new WebDriverWait(webDriver, Duration.ofSeconds(15));
 		wdw.until(new Function<WebDriver, Boolean>() {
@@ -515,11 +752,13 @@ public class MvideoParser implements Parser {
 				return wrap.isFound;
 			}
 		});
-
+		wrap.isFound = false;
 		String d = builder.toString();
+		System.out.println("Got result");
 		JsonNode productsNode;
 		try {
 			productsNode = mapper.readTree(builder.toString());
+			builder.setLength(0);
 		} catch (JsonProcessingException e) {
 			throw new RuntimeException(String.format(
 					"Exception occurred while transforming json string products to json node. Couldn't get data from:\n'%s'",
@@ -529,21 +768,31 @@ public class MvideoParser implements Parser {
 		List<Resource> resources = new ArrayList<>();
 
 		productNodes.forEach(productNode -> {
-			attributes = productNode.findParents("id");
+			if (!productNode.hasNonNull("supplier")) {
+				attributes = productNode.findParents("id");
 
-			String nameTransit = productNode.get("nameTranslit").asText();
-			String id = productNode.get("productId").asText();
-			String productLink = HOME_LINK + "/products/" + nameTransit + "-" + id;
-			String name = productNode.get("name").asText();
+				String nameTransit = productNode.get("nameTranslit").asText();
+				String id = productNode.get("productId").asText();
+				String productLink = HOME_LINK + "/products/" + nameTransit + "-" + id;
+				String name = productNode.get("name").asText();
+				name = name.replaceAll("\\s/\\s", "/");
 
-			Resource resource = new Resource(id, productLink, name);
+				String[] baseInfo = getUniqueInfo(name);
+				if (baseInfo != null) {
 
-			parseCharacteristics(productNode, resource);
+					Resource resource = new Resource(id, productLink, name);
+					resource.addAttribute("brand", baseInfo[0]);
+					resource.addAttribute("model", baseInfo[1]);
+					resource.getColors().put(baseInfo[2], productLink);
 
-			resources.add(resource);
+					parseCharacteristics(productNode, resource);
+
+					resources.add(resource);
+				}
+			}
 		});
-		
-		System.out.println(System.currentTimeMillis() - a);
+
+//		System.out.println(System.currentTimeMillis() - a);
 
 		return resources;
 
