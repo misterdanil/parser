@@ -8,12 +8,14 @@ import java.util.List;
 import java.util.Map;
 
 public class Review {
+	private String id;
 	private String sender;
 	private String text;
 	private String advantages;
 	private String disadvantages;
 	private Date date;
 	private List<String> imageLinks;
+	private Integer rating;
 	private Integer likesCount;
 	private Integer dislikesCount;
 
@@ -21,6 +23,14 @@ public class Review {
 		this.sender = sender;
 		this.text = text;
 		this.date = date;
+	}
+
+	public String getId() {
+		return id;
+	}
+
+	public void setId(String id) {
+		this.id = id;
 	}
 
 	public String getSender() {
@@ -71,6 +81,14 @@ public class Review {
 			imageLinks = new ArrayList<>();
 		}
 		imageLinks.addAll(links);
+	}
+
+	public Integer getRating() {
+		return rating;
+	}
+
+	public void setRating(Integer rating) {
+		this.rating = rating;
 	}
 
 	public Integer getLikesCount() {

@@ -1,27 +1,38 @@
 package parser;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.function.Function;
+import java.util.logging.Level;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 import org.openqa.selenium.By;
 import org.openqa.selenium.PageLoadStrategy;
+import org.openqa.selenium.StaleElementReferenceException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
+import org.openqa.selenium.support.ui.WebDriverWait;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -33,76 +44,246 @@ import parser.smartphone.AbstractSmartphoneParser;
 
 public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 	private final String categoryId = "1461428";
-	private List<WebElement> attributes;
+//	private Map<String, WebElement> attributes = new HashMap<>();
+
+	private Map<String, Element> attributes = new HashMap<>();
 	private List<JsonNode> jsonAttributes;
+	private WebDriver webDriver;
+	private int times;
+	private boolean test = false;
 
 	private static final Logger logger = LoggerFactory.getLogger(EldoradoSmartphoneParser.class);
 
+	public EldoradoSmartphoneParser() {
+		RAM_ID = "15451";
+		ROM_ID = "15451";
+
+		COLOR_ID = "0";
+	}
+
 	@Override
-	public Resource getResource(String link) {
+	public void createWebDriver() {
 		ChromeOptions options = new ChromeOptions();
 		options.setPageLoadStrategy(PageLoadStrategy.NONE);
-		options.addArguments("disable-blink-features=AutomationControlled", "headless",
+		options.addArguments("disable-blink-features=AutomationControlled", "--remote-allow-origins=*",
 				"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
-				"start-maximized", "excludeSwitches=enable-automation", "useAutomationExtension=False");
-		long a = System.currentTimeMillis();
+				"start-maximized", "excludeSwitches=enable-automation", "useAutomationExtension=False",
+				"devtools.jsonview.enabled=false");
+		webDriver = new ChromeDriver(options);
+		System.setProperty("webdriver.chrome.silentOutput", "true");
+		java.util.logging.Logger.getLogger("org.openqa.selenium").setLevel(Level.OFF);
+	}
 
-		WebDriver webDriver = new ChromeDriver(options);
-		webDriver.get(link);
+	private static class Wrap {
+		private Result result;
+		private List<WebElement> webElements;
+		private boolean isExist = true;
+	}
 
-		WebElement body = webDriver.findElement(By.tagName("body"));
+	private static enum Result {
+		OK, BLOCKED;
+	}
 
-		String brandName = getBrand(body);
+	@Override
+	public void finishWebDriver() {
+		webDriver.quit();
+		webDriver = null;
+	}
 
-		WebElement characteristicsNode = body
-				.findElement(By.className("specificationTextTable q-item-full-specs-table"))
-				.findElement(By.tagName("table")).findElement(By.tagName("tbody"));
+	@Override
+	public Resource getResource(Resource resource) {
+		if (times == 20) {
+			times = 0;
+			return null;
+		}
+		System.out.println("starting getting product " + resource.getLink());
+		Wrap wrap = new Wrap();
+		if (test) {
+			webDriver.navigate().to(resource.getLink() + "/");
+		} else {
+			webDriver.navigate().to(resource.getLink());
+		}
+		WebDriverWait wdw = new WebDriverWait(webDriver, Duration.ofSeconds(20));
+		wdw.until(new Function<WebDriver, Boolean>() {
+			public Boolean apply(WebDriver driver) {
+				try {
+					List<WebElement> head = driver.findElements(By.tagName("head"));
+					if (head.size() > 0) {
+						String text = head.get(0).findElement(By.tagName("title")).getAttribute("textContent");
+						if (text.equals("Access Blocked")) {
+							wrap.result = Result.BLOCKED;
+						}
+					}
+					List<WebElement> nextData = webDriver.findElements(By.className("specificationTextTable"));
+					if (nextData.size() > 0) {
+						wrap.result = Result.OK;
+					}
+					return wrap.result != null;
+				} catch (StaleElementReferenceException e) {
+					return apply(driver);
+				}
+			}
+		});
 
-		attributes = characteristicsNode.findElements(By.tagName("tr"));
+		if (wrap.result == Result.BLOCKED) {
+			webDriver.manage().deleteAllCookies();
+			finishWebDriver();
+			createWebDriver();
+			times++;
+			test = test == false;
+			return getResource(resource);
+		}
 
-		webDriver.close();
-		return jsonNode;
+		times = 0;
+
+		Document doc = Jsoup.parse(webDriver.getPageSource());
+//		WebElement characteristicsNode = webDriver.findElement(".specificationTextTable"))
+//				.findElement(By.tagName("table")).findElement(By.tagName("tbody"));
+
+		Element characteristicsNode = doc.select(".specificationTextTable").get(0).select("table").get(0)
+				.select("tbody").get(0);
+
+//		List<WebElement> tempAttributes = characteristicsNode.findElements(By.tagName("tr"));
+
+		Elements tempAttributes = characteristicsNode.select("tr");
+
+		tempAttributes.forEach(tempAttribute -> {
+//			List<WebElement> tds = tempAttribute.findElements(By.tagName("td"));
+
+			Elements tds = tempAttribute.select("td");
+			if (tds.size() > 1) {
+//				attributes.put(tds.get(0).getAttribute("textContent"), tds.get(1));
+				attributes.put(tds.get(0).text(), tds.get(1));
+			}
+		});
+
+		resource.addAttribute("os", getOS());
+		addToResource("screen", resource, getScreenNode(), getMapper());
+		addToResource("screen", resource, getScreenNode(), getMapper());
+		addToResource("processor", resource, getProcessorNode(), getMapper());
+		addToResource("ram", resource, getRamNode(Type.HTML), getMapper());
+		addToResource("rom", resource, getRomNode(Type.HTML), getMapper());
+		addToResource("back_camera", resource, getBackCameraNode(), getMapper());
+		addToResource("front_camera", resource, getFrontCameraNode(), getMapper());
+		addToResource("sd", resource, getSDCardNode(), getMapper());
+		resource.addAttribute("sim", getSimValue());
+		addToResource("wireless", resource, getWirelessNode(), getMapper());
+		addToResource("security", resource, getSecurityNode(), getMapper());
+		addToResource("interface", resource, getInterfacesNode(), getMapper());
+		resource.addAttribute("material", getMaterial());
+		addToResource("battery", resource, getBatteryNode(), getMapper());
+		addToResource("appearance", resource, getAppearanceNode(), getMapper());
+
+		attributes.clear();
+		jsonAttributes.clear();
+
+		return resource;
+	}
+
+	@Override
+	public Resource getResource(String link) {
+//		while (webDriver.findElements(By.className("q-fixed-name")).size() == 0) {
+//			System.out.println("No model");
+//		}
+//
+//		WebElement body = webDriver.findElement(By.tagName("body"));
+//
+//		String model = body.findElement(By.className("q-fixed-name")).findElement(By.tagName("p"))
+//				.getAttribute("textContent");
+//
+//		String id = getId(body);
+//		String brandName = getBrand(body);
+//		String series = getSeries(model);
+//
+//		WebElement characteristicsNode = body.findElement(By.className("specificationTextTable"))
+//				.findElement(By.tagName("table")).findElement(By.tagName("tbody"));
+//
+//		List<WebElement> tempAttributes = characteristicsNode.findElements(By.tagName("tr"));
+//		tempAttributes.forEach(tempAttribute -> {
+//			List<WebElement> tds = tempAttribute.findElements(By.tagName("td"));
+//			if (tds.size() > 1) {
+//				attributes.put(tds.get(0).getAttribute("textContent"), tds.get(1));
+//			}
+//		});
+//
+//		Resource resource = new Resource(id, link, model);
+//		resource.addAttribute("brand", brandName);
+//		resource.addAttribute("series", series);
+//
+//		resource.addAttribute("os", getOS());
+//		addToResource("screen", resource, getScreenNode(), getMapper());
+//		addToResource("processor", resource, getProcessorNode(), getMapper());
+//		addToResource("ram", resource, getRamNode(Type.HTML), getMapper());
+//		addToResource("rom", resource, getRomNode(Type.HTML), getMapper());
+//		addToResource("back_camera", resource, getBackCameraNode(), getMapper());
+//		addToResource("front_camera", resource, getFrontCameraNode(), getMapper());
+//		addToResource("sd", resource, getSDCardNode(), getMapper());
+//		resource.addAttribute("sim", getSimValue());
+//		addToResource("wireless", resource, getWirelessNode(), getMapper());
+//		addToResource("security", resource, getSecurityNode(), getMapper());
+//		addToResource("interface", resource, getInterfacesNode(), getMapper());
+//		resource.addAttribute("material", getMaterial());
+//		addToResource("battery", resource, getBatteryNode(), getMapper());
+//		addToResource("appearance", resource, getAppearanceNode(), getMapper());
+//
+//		return resource;
+
+		return null;
 	}
 
 	@Override
 	public List<Resource> getResources(String link, int page) {
-		JsonNode jsonNode = getProductsNode();
+		System.out.println("Starting getting data from " + link);
+		Iterator<Entry<String, JsonNode>> productsIt = getProductsNode(link);
+		System.out.println("Got product nodes");
 
 		List<Resource> resources = new ArrayList<>();
-		for (int i = 0; i < jsonNode.size(); i++) {
-			JsonNode productNode = jsonNode.get(i);
+		while (productsIt.hasNext()) {
+			JsonNode productNode = productsIt.next().getValue();
+
+			if (productNode.has("agent")) {
+				continue;
+			}
+
+			String category = productNode.get("categoryId").asText();
+			if (!category.equals(categoryId)) {
+				continue;
+			}
 
 			String id = productNode.get("id").asText();
-			String productLink = "https://eldorado/cat/detail/" + productNode.get("code").asText();
+			String productLink = "https://eldorado.ru/cat/detail/" + productNode.get("code").asText();
 			String name = productNode.get("name").asText();
+			String model = productNode.get("model").asText();
 
 			Resource resource = new Resource(id, productLink, name);
+			resource.setPrice(Double.valueOf(productNode.get("price").asText()));
 
 			ArrayNode imageLinks = (ArrayNode) productNode.get("images");
 			List<String> images = new ArrayList<>();
-			for (int j = 0; j < imageLinks.size(); i++) {
-				images.add(imageLinks.get("url").asText());
+			for (int j = 0; j < imageLinks.size(); j++) {
+				images.add(imageLinks.get(j).get("url").asText());
 			}
 			resource.addAttribute("images", String.join(", ", images.toArray(new String[images.size()])));
 
-			String brand = getBrand(productNode);
+			String brand = getBrandFromJson(productNode);
 			resource.addAttribute("brand", brand);
 
-			String series = getSeries(productNode);
+			String series = getSeries(model);
 			resource.addAttribute("series", series);
 
 			ArrayNode listingDescriptionNode = (ArrayNode) productNode.get("listingDescription");
 
 			jsonAttributes = listingDescriptionNode.findParents("id");
 
-			ObjectNode ramNode = getRamNode();
+			ObjectNode ramNode = getRamNode(Type.JSON);
 			addToResource("ram", resource, ramNode, getMapper());
 
-			ObjectNode romNode = getRomNode();
+			ObjectNode romNode = getRomNode(Type.JSON);
 			addToResource("rom", resource, romNode, getMapper());
 
-			ObjectNode appearanceNode = getMainAppearanceNode();
+			ObjectNode appearanceNode = getMainAppearanceNode(Type.JSON);
 			addToResource("appearance", resource, appearanceNode, getMapper());
+			resource.getColors().put(appearanceNode.get("color").asText(), productLink);
 
 			resources.add(resource);
 		}
@@ -115,62 +296,67 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 		List<JsonNode> nodes = jsonAttributes.stream().filter(item -> item.get("id").asText().equals(id))
 				.collect(Collectors.toList());
 		if (nodes.size() > 0) {
-			return nodes.get(0).get("attributeNameToValueMap").get(property).asText();
+			return nodes.get(0).get("attributeNameToValueMap").path(property).asText(null);
 		}
 		return null;
 	}
 
-	private JsonNode getProductsNode() {
-		ChromeOptions options = new ChromeOptions();
-		options.setPageLoadStrategy(PageLoadStrategy.NONE);
-		options.addArguments("disable-blink-features=AutomationControlled", "headless",
-				"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
-				"start-maximized", "excludeSwitches=enable-automation", "useAutomationExtension=False");
-		long a = System.currentTimeMillis();
+	private Iterator<Entry<String, JsonNode>> getProductsNode(String link) {
+		Wrap wrap = new Wrap();
+		webDriver.navigate().to(link);
 
-		WebDriver webDriver = new ChromeDriver(options);
-		webDriver.get("https://www.eldorado.ru/c/smartfony/");
-
-		List<WebElement> webElements = new ArrayList<>();
-		while (webElements.size() == 0) {
-			webElements = webDriver.findElements(By.id("__NEXT_DATA__"));
-			System.out.println("check");
-			synchronized (webDriver) {
+		WebDriverWait wdw = new WebDriverWait(webDriver, Duration.ofSeconds(30));
+		wdw.until(new Function<WebDriver, Boolean>() {
+			public Boolean apply(WebDriver driver) {
+				wrap.webElements = driver.findElements(By.tagName("head"));
 				try {
-					webDriver.wait(500);
-				} catch (InterruptedException e) {
-					throw new RuntimeException("Exception occurred while waiting for searching products element", e);
+					if (wrap.webElements.size() > 0) {
+						String text = wrap.webElements.get(0).findElement(By.tagName("title"))
+								.getAttribute("textContent");
+						if (text.equals("Access Blocked")) {
+							wrap.result = Result.BLOCKED;
+						}
+					}
+					wrap.webElements = webDriver.findElements(By.id("__NEXT_DATA__"));
+					if (wrap.webElements.size() > 0) {
+						wrap.result = Result.OK;
+					}
+				} catch (StaleElementReferenceException e) {
+					return apply(driver);
 				}
+				return wrap.result != null;
 			}
+		});
+
+		if (wrap.result == Result.BLOCKED) {
+			webDriver.navigate().to("https://eldorado.ru");
+			return getProductsNode(link);
 		}
-		String jsonText = webElements.get(0).getAttribute("textContent");
+
+		String jsonText = wrap.webElements.get(0).getAttribute("textContent");
 		JsonNode jsonNode;
 		try {
 			jsonNode = getMapper().readTree(jsonText);
 		} catch (JsonProcessingException e) {
 			throw new RuntimeException("Exception occurred while reading json products data", e);
 		}
-		jsonNode = jsonNode.get("props").get("initialState").get("products-store-module").get("products");
-		webDriver.close();
-		return jsonNode;
+		return jsonNode.get("props").get("initialState").get("products-store-module").get("products").fields();
 	}
 
-	@Override
-	public List<Review> getReviews(String productId) {
-		return null;
+	public String getId(WebElement webElement) {
+		return webElement.findElement(By.className("basket")).getAttribute("data-gtm-product-id");
 	}
 
-	public String getSeries(WebElement webElement) {
-		String model = webElement.findElement(By.className("q-fixed-name no-mobile")).getText();
+	public String getSeries(String model) {
 		try {
 			return extractByRegex(REGEX_NAME1, model, "series");
 		} catch (RegexMismatchException e) {
-			logger.info("Couldn't get series from model" + model + " by regex " + REGEX_NAME1);
+			System.out.println("Couldn't get series from model" + model + " by regex " + REGEX_NAME1);
 			return null;
 		}
 	}
 
-	private static String REGEX_NAME1 = "(?<series>.+?(?= \\d+[/+]\\d+GB)) ([^\\s]*) (?<color>.+?(?= \\()) (.*$)";
+	private static String REGEX_NAME1 = "(?<series>.+?(?= \\d*[/+]?\\d+(GB|TB))) (.*$)";
 
 	private class RegexMismatchException extends Exception {
 
@@ -188,10 +374,10 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 
 	private String extractByRegex(String regex, String text, String group) throws RegexMismatchException {
 		Pattern p = Pattern.compile(regex);
-		Matcher m = p.matcher(group);
+		Matcher m = p.matcher(text);
 		if (m.matches()) {
 			try {
-				return m.group(text);
+				return m.group(group);
 			} catch (IllegalStateException e) {
 				throw new RegexMismatchException("Couldn't extract group " + group, e);
 			}
@@ -204,21 +390,26 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 		return element.findElement(By.className("i-flocktory")).getAttribute("data-fl-item-vendor");
 	}
 
+	public String getBrandFromJson(JsonNode node) {
+		return node.path("brandName").asText();
+	}
+
 	public String getOS() {
 		return extractByName("Операционная система");
 	}
 
 	private String extractByName(String name) {
-		for (int i = 0; i < attributes.size(); i++) {
-			List<WebElement> tds = attributes.get(i).findElements(By.tagName("td"));
-			if (tds.get(0).getText().equals(name)) {
-				return tds.get(1).getText();
+		if (attributes.containsKey(name)) {
+			String text = attributes.get(name).ownText();
+			if (text.contains("&nbsp")) {
+				text = text.substring(0, text.indexOf("&nbsp"));
 			}
+			return text;
 		}
 		return null;
 	}
 
-	public ObjectNode getScreenNode(WebElement webElement) {
+	public ObjectNode getScreenNode() {
 		String type = extractByName("Тип экрана");
 		String diagonal = extractByName("Диагональ экрана");
 		String resolution = extractByName("Разрешение экрана");
@@ -255,9 +446,17 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 		return text.contains("ГЛОНАСС");
 	}
 
-	public ObjectNode getRamNode() {
-		String value = extractByName("Объем оперативной памяти");
+	private static enum Type {
+		JSON, HTML;
+	}
 
+	public ObjectNode getRamNode(Type type) {
+		String value;
+		if (type.equals(Type.JSON)) {
+			value = getPropertyById(RAM_ID, "Объем оперативной памяти");
+		} else {
+			value = extractByName("Объем оперативной памяти");
+		}
 		ObjectNode ramNode = getMapper().createObjectNode();
 		if (value != null) {
 			String[] valueAndMeasure = value.split(" ");
@@ -268,9 +467,13 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 		return ramNode;
 	}
 
-	public ObjectNode getRomNode() {
-		String value = extractByName("Объем встроенной памяти");
-
+	public ObjectNode getRomNode(Type type) {
+		String value;
+		if (type.equals(Type.JSON)) {
+			value = getPropertyById(RAM_ID, "Объем встроенной памяти");
+		} else {
+			value = extractByName("Объем встроенной памяти");
+		}
 		ObjectNode romNode = getMapper().createObjectNode();
 		if (value != null) {
 			String[] valueAndMeasure = value.split(" ");
@@ -282,8 +485,7 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 	}
 
 	public ObjectNode getBackCameraNode() {
-		String mpicsStr = extractByName("Разрешение камеры");
-		String mpics = mpicsStr != null ? String.join(", ", mpicsStr.split("+")) : null;
+		String mpics = extractByName("Разрешение камеры");
 		String count = extractByName("Количество основных камер");
 		String zoom = extractByName("Zoom цифровой");
 		String flash = extractByName("Встроенная вспышка");
@@ -298,8 +500,7 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 	}
 
 	public ObjectNode getFrontCameraNode() {
-		String mpicsStr = extractByName("Разрешение фронтальной камеры");
-		String mpics = mpicsStr != null ? String.join(", ", mpicsStr.split("/")) : null;
+		String mpics = extractByName("Разрешение фронтальной камеры");
 		String count = extractByName("Количество фронтальных камер");
 
 		ObjectNode frontCameraNode = getMapper().createObjectNode();
@@ -333,8 +534,9 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 		Boolean isSupport5G = toBoolean(extractByName("Работа в 5G(LTE)-сетях"));
 		String wifi = extractByName("Стандарт Wi-Fi");
 		String bluetooth = extractByName("Версия Bluetooth");
-		Boolean isSupportGPS = toGpsSupport(extractByName("Спутниковая навигация"));
-		Boolean isSupportGlonass = toGlonassSupport(extractByName("Спутниковая навигация"));
+		String navigation = extractByName("Спутниковая навигация");
+		Boolean isSupportGPS = navigation != null ? toGpsSupport(navigation) : null;
+		Boolean isSupportGlonass = navigation != null ? toGlonassSupport(navigation) : null;
 
 		ObjectNode wirelessNode = getMapper().createObjectNode();
 		addToNode(wirelessNode, "5g_support", isSupport5G);
@@ -396,23 +598,23 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 
 	public ObjectNode getAppearanceNode() {
 		String color = extractByName("Цвет");
+
 		String weight = extractByName("Вес");
-		if (weight != null) {
-			String measure = WeightMeasure.getWeightMeasureString(weight.split(" ")[1]);
-		}
+		String weightMeasure = WeightMeasure.getWeightMeasureString(weight.split(" ")[1]);
+
 		String height = extractByName("Высота");
-		height = height == null ? height.split(" ")[0] : null;
+		String clearHeight = height != null ? height.split(" ")[0] : null;
 
 		String width = extractByName("Ширина");
-		width = width == null ? width.split(" ")[0] : null;
+		String clearWidth = width != null ? width.split(" ")[0] : null;
 
 		String depth = extractByName("Глубина");
-		depth = depth == null ? depth.split(" ")[0] : null;
+		String clearDepth = depth != null ? depth.split(" ")[0] : null;
 
 		String measure = height == null ? width.split(" ")[1] : height.split(" ")[1];
 		measure = measure == null ? depth.split(" ")[1] : null;
 
-		String dimensions = String.join("*", height, width, depth);
+		String dimensions = String.join("*", clearHeight, clearWidth, clearDepth);
 		dimensions += " ";
 
 		ObjectNode appearanceNode = getMapper().createObjectNode();
@@ -424,13 +626,107 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 		return appearanceNode;
 	}
 
-	public ObjectNode getMainAppearanceNode() {
-		String color = getPropertyById(COLOR_ID, "Цвет");
-
+	public ObjectNode getMainAppearanceNode(Type type) {
+		String color;
+		if (type.equals(Type.JSON)) {
+			color = getPropertyById(COLOR_ID, "Цвет");
+		} else {
+			color = extractByName("Цвет");
+		}
 		ObjectNode appearanceNode = getMapper().createObjectNode();
 		addToNode(appearanceNode, "color", color);
 
 		return appearanceNode;
+	}
+
+	@Override
+	public List<Review> getReviews(Resource resource) {
+		if (times == 20) {
+			times = 0;
+			return null;
+		}
+
+		int page = 1;
+		String link = resource.getLink();
+
+		Wrap wrap = new Wrap();
+
+		List<Review> reviews = new ArrayList<>();
+
+		while (wrap.isExist) {
+			webDriver.navigate().to(link + "/page/" + page + "/?show=response");
+
+			WebDriverWait wdw = new WebDriverWait(webDriver, Duration.ofSeconds(20));
+			wdw.until(new Function<WebDriver, Boolean>() {
+				public Boolean apply(WebDriver driver) {
+					try {
+						List<WebElement> head = driver.findElements(By.tagName("head"));
+						if (head.size() > 0) {
+							String text = head.get(0).findElement(By.tagName("title")).getAttribute("textContent");
+							if (text.equals("Access Blocked")) {
+								wrap.result = Result.BLOCKED;
+								return true;
+							}
+						}
+						List<WebElement> userReviews = webDriver.findElements(By.className("usersReviewsList"));
+						if (userReviews.size() > 0
+								&& userReviews.get(0).findElements(By.className("usersReviewsListItem")).size() == 0) {
+							wrap.isExist = false;
+							wrap.result = Result.OK;
+						}
+						else {
+							wrap.result = Result.OK;
+						}
+						
+						return wrap.result.equals(Result.OK);
+
+					} catch (StaleElementReferenceException e) {
+						return apply(driver);
+					}
+				}
+			});
+			if (wrap.result == Result.BLOCKED) {
+				webDriver.manage().deleteAllCookies();
+				finishWebDriver();
+				createWebDriver();
+				times++;
+				test = test == false;
+				return getReviews(resource);
+			}
+
+			if (wrap.isExist) {
+				times = 0;
+
+				Document pageNode = Jsoup.parse(webDriver.getPageSource());
+				Elements reviewNodes = pageNode.getElementsByClass("usersReviewsListItem");
+				reviewNodes.forEach(reviewNode -> {
+					Element topNode = reviewNode.getElementsByClass("topBlockItem").get(0);
+					String sender = topNode.getElementsByClass("userName").get(0).ownText();
+
+					String date = topNode.getElementsByClass("userReviewDate").get(0).ownText();
+					SimpleDateFormat sdf = new SimpleDateFormat("dd.mm.yyyy hh:mm:ss");
+					Date sendDate;
+					try {
+						sendDate = sdf.parse(date);
+					} catch (ParseException e) {
+						throw new RuntimeException(
+								String.format("Exception occurred while parsing date. Couldn't parse date '%s'", date),
+								e);
+					}
+
+					String text = reviewNode.getElementsByClass("middleBlockItem").get(0).ownText();
+					Integer rating = reviewNode.getElementsByClass("starFull").size();
+
+					Review review = new Review(sender, text, sendDate);
+					review.setRating(rating);
+
+					reviews.add(review);
+				});
+
+				page++;
+			}
+		}
+		return reviews;
 	}
 
 }

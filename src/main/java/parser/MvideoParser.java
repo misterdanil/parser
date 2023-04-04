@@ -5,17 +5,18 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.bson.Document;
 import org.openqa.selenium.PageLoadStrategy;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
@@ -23,7 +24,6 @@ import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.devtools.DevTools;
 import org.openqa.selenium.devtools.v109.network.Network;
 import org.openqa.selenium.devtools.v109.network.model.RequestId;
-import org.openqa.selenium.support.ui.WebDriverWait;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -403,7 +403,6 @@ public class MvideoParser implements Parser {
 		return null;
 	}
 
-	@Override
 	public List<String> getLinks(String link, int page) {
 		link += "?page=" + page;
 
@@ -468,8 +467,8 @@ public class MvideoParser implements Parser {
 	}
 
 	private void addInitialData(Resource resource, JsonNode node) {
-		String series = getPropertyById(SERIES_ID, "value");
-		resource.addAttribute("series", series);
+//		String series = getPropertyById(SERIES_ID, "value");
+//		resource.addAttribute("series", series);
 		String model = getPropertyById(MODEL_ID, "value");
 		resource.addAttribute("model", model);
 		String os = getPropertyById(OS_ID, "value");
@@ -495,7 +494,7 @@ public class MvideoParser implements Parser {
 
 		ObjectNode screenNode = mapper.createObjectNode();
 
-		addToNode(screenNode, "diagonal", screen.substring(0, screen.indexOf("\"")));
+		addToNode(screenNode, "diagonal", Double.valueOf(screen.substring(0, screen.indexOf("\""))));
 		addToNode(screenNode, "resolution", screen.substring(screen.indexOf("/") + 1, screen.length()));
 		addToNode(screenNode, "type", type);
 		addToNode(screenNode, "frequency", frequency);
@@ -506,6 +505,12 @@ public class MvideoParser implements Parser {
 	}
 
 	private void addToNode(ObjectNode node, String key, String value) {
+		if (value != null) {
+			node.put(key, value);
+		}
+	}
+
+	private void addToNode(ObjectNode node, String key, Double value) {
 		if (value != null) {
 			node.put(key, value);
 		}
@@ -537,6 +542,7 @@ public class MvideoParser implements Parser {
 
 	private void addRamNode(Resource resource, JsonNode node, ObjectMapper mapper) {
 		String value = getPropertyById(RAM_ID, "value");
+		System.out.println("value of ram " + value);
 		String measure = getPropertyById(RAM_ID, "measure");
 
 		ObjectNode ramNode = mapper.createObjectNode();
@@ -689,7 +695,7 @@ public class MvideoParser implements Parser {
 
 	private void addToResource(String name, Resource resource, ObjectNode node, ObjectMapper mapper) {
 		try {
-			resource.addAttribute(name, mapper.writeValueAsString(node));
+			resource.addAttribute(name, Document.parse(mapper.writeValueAsString(node)));
 		} catch (JsonProcessingException e) {
 			throw new RuntimeException(String.format(
 					"Exception occurred while transformating json to string. Couldn't transform mvideo '%s' json data to string",
@@ -706,7 +712,7 @@ public class MvideoParser implements Parser {
 			webDriver.quit();
 		}
 		ChromeOptions options = new ChromeOptions();
-		options.addArguments("disable-blink-features=AutomationControlled", "--headless",
+		options.addArguments("disable-blink-features=AutomationControlled", "--remote-allow-origins=*",
 				"user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36",
 				"start-maximized", "excludeSwitches=enable-automation", "useAutomationExtension=False",
 				"devtools.jsonview.enabled=false");
@@ -741,23 +747,50 @@ public class MvideoParser implements Parser {
 
 	@Override
 	public List<Resource> getResources(String link, int page) {
-		link += "&page=" + page;
+//		link += "&page=" + page;
+//
+//		webDriver.navigate().to(link);
+//		System.out.println("Navigate to " + link);
 
-		webDriver.navigate().to(link);
-		System.out.println("Navigate to " + link);
+//		WebDriverWait wdw = new WebDriverWait(webDriver, Duration.ofSeconds(15));
+//		wdw.until(new Function<WebDriver, Boolean>() {
+//			public Boolean apply(WebDriver driver) {
+//				return wrap.isFound;
+//			}
+//		});
+//		wrap.isFound = false;
+//		String d = builder.toString();
+		WebClient webClient = getWebClient();
+		int offset = (page - 1) * 24;
 
-		WebDriverWait wdw = new WebDriverWait(webDriver, Duration.ofSeconds(15));
-		wdw.until(new Function<WebDriver, Boolean>() {
-			public Boolean apply(WebDriver driver) {
-				return wrap.isFound;
-			}
-		});
-		wrap.isFound = false;
-		String d = builder.toString();
+		link += "?categoryId=" + 205 + "&offset=" + offset + "&limit=24";
+
+		webClient.addRequestHeader("accept", "application/json");
+		String content;
+		try {
+			content = webClient.getPage(link).getWebResponse().getContentAsString();
+		} catch (IOException e) {
+			throw new RuntimeException(String.format(
+					"Exception occurred while getting resources by link '%s'. Couldn't get response body", link), e);
+		}
+
+		List<String> productIds = getProductIds(content);
+
+		Map<String, Double> prices = getPrices(productIds);
+
+		for (int i = 0; i < productIds.size(); i++) {
+			productIds.set(i, "\"" + productIds.get(i) + "\"");
+		}
+
+		String body = (String) webDriver.executeScript(
+				"const response = await fetch('https://www.mvideo.ru/bff/product-details/list', { method: 'POST',headers: {'Accept': 'application/json', 'Content-Type': 'application/json'},body:JSON.stringify({\"productIds\":"
+						+ productIds
+						+ ",\"mediaTypes\":[\"images\"],\"category\":true,\"status\":true,\"brand\":true,\"propertyTypes\":[\"ALL\"],\"propertiesConfig\":{\"propertiesPortionSize\":70},\"multioffer\":false}) }); const json = await response.json(); console.log(JSON.stringify(json)); return JSON.stringify(json);");
+
 		System.out.println("Got result");
 		JsonNode productsNode;
 		try {
-			productsNode = mapper.readTree(builder.toString());
+			productsNode = mapper.readTree(body);
 			builder.setLength(0);
 		} catch (JsonProcessingException e) {
 			throw new RuntimeException(String.format(
@@ -767,30 +800,54 @@ public class MvideoParser implements Parser {
 		ArrayNode productNodes = (ArrayNode) productsNode.findValue("products");
 		List<Resource> resources = new ArrayList<>();
 
-		productNodes.forEach(productNode -> {
-			if (!productNode.hasNonNull("supplier")) {
-				attributes = productNode.findParents("id");
+		for (int i = 0; i < productNodes.size(); i++) {
+			if (!productNodes.get(i).hasNonNull("supplier")) {
+				attributes = productNodes.get(i).findParents("id");
 
-				String nameTransit = productNode.get("nameTranslit").asText();
-				String id = productNode.get("productId").asText();
+				String nameTransit = productNodes.get(i).get("nameTranslit").asText();
+				String id = productNodes.get(i).get("productId").asText();
 				String productLink = HOME_LINK + "/products/" + nameTransit + "-" + id;
-				String name = productNode.get("name").asText();
+				String name = productNodes.get(i).get("name").asText();
 				name = name.replaceAll("\\s/\\s", "/");
 
-				String[] baseInfo = getUniqueInfo(name);
-				if (baseInfo != null) {
+				Resource resource = new Resource(id, productLink, name);
+				resource.setPrice(Double.valueOf(prices.get(id)));
 
-					Resource resource = new Resource(id, productLink, name);
-					resource.addAttribute("brand", baseInfo[0]);
-					resource.addAttribute("model", baseInfo[1]);
-					resource.getColors().put(baseInfo[2], productLink);
-
-					parseCharacteristics(productNode, resource);
-
-					resources.add(resource);
+				String images = productNodes.get(i).path("images").toPrettyString();
+				if (images != null) {
+					try {
+						List<String> imageLinks = mapper.readValue(images, new TypeReference<List<String>>() {
+						});
+						for (int j = 0; j < imageLinks.size(); j++) {
+							imageLinks.set(j, "https://mvideo.ru/" + imageLinks.get(j));
+						}
+						resource.getImages().addAll(imageLinks);
+					} catch (IOException e) {
+						throw new RuntimeException(String.format(
+								"Exception occurred while parsing json images. Couldn't get images from json:\n%s",
+								body), e);
+					}
 				}
+				resource.addAttribute("brand", productNodes.get(i).get("brandName").asText());
+				String[] baseInfo = getUniqueInfo(name);
+
+				String series = null;
+				if (baseInfo == null) {
+					series = getSeries();
+				} else {
+					series = baseInfo[1];
+				}
+
+				resource.addAttribute("series", series);
+				resource.getColors().put(getColor(), productLink);
+
+//				System.out.println(productNode);
+
+				parseCharacteristics(productNodes.get(i), resource);
+
+				resources.add(resource);
 			}
-		});
+		}
 
 //		System.out.println(System.currentTimeMillis() - a);
 
@@ -827,6 +884,78 @@ public class MvideoParser implements Parser {
 
 	}
 
+	private String getColor() {
+		return getPropertyById("89", "value");
+	}
+
+	private String getSeries() {
+		String series = getPropertyById("46", "value");
+		if (series == null) {
+			series = getPropertyById("752", "value");
+		}
+		return series;
+	}
+
+	@Override
+	public Resource getResource(Resource resource) {
+//		long a = System.currentTimeMillis();
+//
+//		webClient.addRequestHeader("accept", "application/json");
+//		String content;
+//		try {
+//			String j = (String) webDriver.executeScript(
+//					"const response = await fetch('https://www.mvideo.ru/bff/product-details/list', { method: 'POST',headers: {'Accept': 'application/json', 'Content-Type': 'application/json'},body:JSON.stringify({\"productIds\":[\"30064210\",\"30064911\",\"30067224\",\"30064946\",\"30067205\",\"30064934\",\"30065329\",\"30063274\",\"30065558\",\"30064918\",\"30063236\",\"30064941\",\"30065546\",\"30066493\",\"30065562\",\"30066554\",\"30065350\",\"30064939\",\"30066440\",\"30064909\",\"30065456\",\"30067223\",\"30063312\",\"30064407\"],\"mediaTypes\":[\"images\"],\"category\":true,\"status\":true,\"brand\":true,\"propertyTypes\":[\"ALL\"],\"propertiesConfig\":{\"propertiesPortionSize\":70},\"multioffer\":false}) }); const json = await response.json(); console.log(JSON.stringify(json)); return JSON.stringify(json);");
+//
+//			content = page.getWebResponse().getContentAsString();
+//		} catch (FailingHttpStatusCodeException | IOException e) {
+//			throw new RuntimeException(String.format(
+//					"Exception occurred while getting mvideo json resources. Couldn't get data from '%s'", link), e);
+//		}
+//		long b = System.currentTimeMillis();
+//		System.out.println(b - a);
+//
+//		JsonNode body;
+//		try {
+//			body = mapper.readTree(content).get("body");
+//		} catch (JsonProcessingException e) {
+//			throw new RuntimeException(String.format(
+//					"Exception occured while transformating string json to jackson json node. Couldn't transform product data:\n%s",
+//					link), e);
+//		}
+//
+//		String id = body.path("productId").asText(null);
+//		String name = body.path("name").asText(null);
+//		name = name.replaceAll("\\s/\\s", "/");
+//
+//		String[] info = getUniqueInfo(name);
+//
+//		Resource resource = new Resource(id, link, name);
+//
+//		String images = body.path("images").toPrettyString();
+//		if (images != null) {
+//			try {
+//				String[] imageLinks = mapper.readValue(images, String[].class);
+//				resource.addAttribute("images", String.join(", ", imageLinks));
+//			} catch (IOException e) {
+//				throw new RuntimeException(String.format(
+//						"Exception occurred while parsing json images. Couldn't get images from json:\n%s", body), e);
+//			}
+//		}
+//
+//		JsonNode all = body.get("properties").get("all");
+//
+//		resource.addAttribute("brand", info[0]);
+//		resource.addAttribute("model", info[1]);
+//		resource.getColors().put(info[2], link);
+//
+//		attributes = body.get("properties").get("all").findParents("id");
+//
+//		parseCharacteristics(all, resource);
+//
+//		return resource;
+		return null;
+	}
+
 	private List<String> getProductIds(String content) {
 		JsonNode node;
 		try {
@@ -839,6 +968,30 @@ public class MvideoParser implements Parser {
 		List<String> productIds = transformData(node.findValue("products"));
 
 		return productIds;
+	}
+
+	private Map<String, Double> getPrices(List<String> productIds) {
+		String query = String.join(",", productIds.toArray(new String[0]));
+
+		try {
+			String url = "https://www.mvideo.ru/bff/products/prices?productIds=" + query
+					+ "&addBonusRubles=true&isPromoApplied=true";
+			String content = webClient.getPage(url).getWebResponse().getContentAsString();
+			JsonNode node = mapper.readTree(content);
+			ArrayNode priceNodes = (ArrayNode) node.findValue("materialPrices");
+
+			Map<String, Double> prices = new HashMap<>();
+			priceNodes.forEach(priceNode -> {
+				prices.put(priceNode.get("productId").asText(), priceNode.get("price").get("salePrice").asDouble());
+			});
+
+			return prices;
+		} catch (IOException e) {
+			e.printStackTrace();
+			System.out.println("Couldn't get json response of prices");
+		}
+
+		return null;
 	}
 
 	private List<JsonNode> getProducts(List<String> ids, WebClient webClient) {
@@ -940,8 +1093,8 @@ public class MvideoParser implements Parser {
 //	}
 
 	@Override
-	public List<Review> getReviews(String productId) {
-		String link = "https://www.mvideo.ru/bff/reviews/product?productId=" + productId;
+	public List<Review> getReviews(Resource resource) {
+		String link = "https://www.mvideo.ru/bff/reviews/product?productId=" + resource.getId();
 		WebClient webClient = getWebClient();
 
 		String content;

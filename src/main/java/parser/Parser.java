@@ -8,9 +8,13 @@ import model.Review;
 public interface Parser {
 	Resource getResource(String link);
 
-	List<Resource> getResources(String link, int page);
-	
-	List<String> getLinks(String link, int page);
+	Resource getResource(Resource resource);
 
-	List<Review> getReviews(String productId);
+	List<Resource> getResources(String link, int page);
+
+	List<Review> getReviews(Resource resource);
+
+	void createWebDriver();
+
+	void finishWebDriver();
 }

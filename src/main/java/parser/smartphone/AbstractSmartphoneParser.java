@@ -1,5 +1,7 @@
 package parser.smartphone;
 
+import org.bson.Document;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -13,7 +15,7 @@ public abstract class AbstractSmartphoneParser implements Parser {
 	protected String SERIES_ID;
 	protected String MODEL_ID;
 	protected String OS_ID;
-	
+
 	protected String SCREEN_DIAGONAL_ID;
 	protected String SCREEN_RESOLUTION_ID;
 	protected String SCREEN_TECHNOLOGY_ID;
@@ -68,13 +70,7 @@ public abstract class AbstractSmartphoneParser implements Parser {
 
 	private ObjectMapper mapper = new ObjectMapper();
 
-	public abstract String getSeries(Object node);
-
-	public abstract String getBrand(Object node);
-
-	public abstract String getOS(Object node);
-
-	public abstract ObjectNode getScreenNode(Object node);
+	public abstract Resource getResource(Resource resource);
 
 	protected void addToNode(ObjectNode node, String key, String value) {
 		if (value != null) {
@@ -87,9 +83,10 @@ public abstract class AbstractSmartphoneParser implements Parser {
 			node.put(key, value);
 		}
 	}
+
 	protected void addToResource(String name, Resource resource, ObjectNode node, ObjectMapper mapper) {
 		try {
-			resource.addAttribute(name, mapper.writeValueAsString(node));
+			resource.addAttribute(name, Document.parse(mapper.writeValueAsString(node)));
 		} catch (JsonProcessingException e) {
 			throw new RuntimeException(String.format(
 					"Exception occurred while transformating json to string. Couldn't transform mvideo '%s' json data to string",
@@ -116,32 +113,6 @@ public abstract class AbstractSmartphoneParser implements Parser {
 					e);
 		}
 	}
-
-	public abstract ObjectNode getProcessorNode(Object node);
-
-	public abstract ObjectNode getRamNode(Object node);
-
-	public abstract ObjectNode getRomNode(Object node);
-
-	public abstract ObjectNode getBackCameraNode(Object node);
-
-	public abstract ObjectNode getFrontCameraNode(Object node);
-
-	public abstract ObjectNode getSDCardNode(Object node);
-
-	public abstract ObjectNode getSimNode(Object node);
-
-	public abstract ObjectNode getWirelessNode(Object node);
-
-	public abstract ObjectNode getSecurityNode(Object node);
-
-	public abstract ObjectNode getInterfacesNode(Object node);
-
-	public abstract ObjectNode getMaterialNode(Object node);
-
-	public abstract ObjectNode getBatteryNode(Object node);
-
-	public abstract ObjectNode getAppearanceNode(Object node);
 
 	public ObjectMapper getMapper() {
 		return mapper;
