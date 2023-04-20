@@ -126,9 +126,14 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 		});
 
 		if (wrap.result == Result.BLOCKED) {
-			webDriver.manage().deleteAllCookies();
 			finishWebDriver();
 			createWebDriver();
+			try {
+				Thread.sleep(60000);
+			} catch (InterruptedException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 			times++;
 			test = test == false;
 			return getResource(resource);
@@ -234,7 +239,7 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 	@Override
 	public List<Resource> getResources(String link, int page) {
 		System.out.println("Starting getting data from " + link);
-		Iterator<Entry<String, JsonNode>> productsIt = getProductsNode(link);
+		Iterator<Entry<String, JsonNode>> productsIt = getProductsNode(link + "/?page=" + page);
 		System.out.println("Got product nodes");
 
 		List<Resource> resources = new ArrayList<>();
@@ -261,9 +266,10 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 			ArrayNode imageLinks = (ArrayNode) productNode.get("images");
 			List<String> images = new ArrayList<>();
 			for (int j = 0; j < imageLinks.size(); j++) {
-				images.add(imageLinks.get(j).get("url").asText());
+				images.add("https://static.eldorado.ru" + imageLinks.get(j).get("url").asText());
 			}
-			resource.addAttribute("images", String.join(", ", images.toArray(new String[images.size()])));
+
+			resource.getImages().addAll(images);
 
 			String brand = getBrandFromJson(productNode);
 			resource.addAttribute("brand", brand);
@@ -330,6 +336,11 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 
 		if (wrap.result == Result.BLOCKED) {
 			webDriver.navigate().to("https://eldorado.ru");
+			try {
+				Thread.sleep(2500);
+			} catch (InterruptedException e) {
+				e.printStackTrace();
+			}
 			return getProductsNode(link);
 		}
 
@@ -412,6 +423,11 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 	public ObjectNode getScreenNode() {
 		String type = extractByName("Тип экрана");
 		String diagonal = extractByName("Диагональ экрана");
+		if (diagonal != null) {
+			if (diagonal.contains("\"")) {
+				diagonal = diagonal.replace("\"", "");
+			}
+		}
 		String resolution = extractByName("Разрешение экрана");
 		String frequency = extractByName("Максимальная частота обновления");
 
@@ -600,7 +616,7 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 		String color = extractByName("Цвет");
 
 		String weight = extractByName("Вес");
-		String weightMeasure = WeightMeasure.getWeightMeasureString(weight.split(" ")[1]);
+//		String weightMeasure = WeightMeasure.getWeightMeasureString(weight.split(" ")[1]);
 
 		String height = extractByName("Высота");
 		String clearHeight = height != null ? height.split(" ")[0] : null;
@@ -611,8 +627,12 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 		String depth = extractByName("Глубина");
 		String clearDepth = depth != null ? depth.split(" ")[0] : null;
 
-		String measure = height == null ? width.split(" ")[1] : height.split(" ")[1];
-		measure = measure == null ? depth.split(" ")[1] : null;
+		String measure = null;
+		if (width == null && height == null && depth != null) {
+			measure = depth.split(" ")[1];
+		} else if (width != null || height != null) {
+			measure = height == null ? width.split(" ")[1] : height.split(" ")[1];
+		}
 
 		String dimensions = String.join("*", clearHeight, clearWidth, clearDepth);
 		dimensions += " ";
@@ -673,11 +693,10 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 								&& userReviews.get(0).findElements(By.className("usersReviewsListItem")).size() == 0) {
 							wrap.isExist = false;
 							wrap.result = Result.OK;
-						}
-						else {
+						} else {
 							wrap.result = Result.OK;
 						}
-						
+
 						return wrap.result.equals(Result.OK);
 
 					} catch (StaleElementReferenceException e) {

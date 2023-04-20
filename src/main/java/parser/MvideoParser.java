@@ -819,7 +819,7 @@ public class MvideoParser implements Parser {
 						List<String> imageLinks = mapper.readValue(images, new TypeReference<List<String>>() {
 						});
 						for (int j = 0; j < imageLinks.size(); j++) {
-							imageLinks.set(j, "https://mvideo.ru/" + imageLinks.get(j));
+							imageLinks.set(j, "https://static.mvideo.ru/" + imageLinks.get(j));
 						}
 						resource.getImages().addAll(imageLinks);
 					} catch (IOException e) {
@@ -839,8 +839,10 @@ public class MvideoParser implements Parser {
 				}
 
 				resource.addAttribute("series", series);
-				resource.getColors().put(getColor(), productLink);
-
+				String color = getColor();
+				if (color != null) {
+					resource.getColors().put(getColor(), productLink);
+				}
 //				System.out.println(productNode);
 
 				parseCharacteristics(productNodes.get(i), resource);

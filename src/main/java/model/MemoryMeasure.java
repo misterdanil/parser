@@ -19,6 +19,8 @@ public enum MemoryMeasure {
 			return GB.toString();
 		} else if (value.equals("пб")) {
 			return PB.toString();
+		} else if (value.equals("тб")) {
+			return PB.toString();
 		} else {
 			return null;
 		}
