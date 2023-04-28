@@ -18,6 +18,7 @@ public class Review {
 	private Integer rating;
 	private Integer likesCount;
 	private Integer dislikesCount;
+	private String type;
 
 	public Review(String sender, String text, Date date) {
 		this.sender = sender;
@@ -105,6 +106,14 @@ public class Review {
 
 	public void setDislikesCount(Integer dislikesCount) {
 		this.dislikesCount = dislikesCount;
+	}
+
+	public String getType() {
+		return type;
+	}
+
+	public void setType(String type) {
+		this.type = type;
 	}
 
 }

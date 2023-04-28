@@ -1126,6 +1126,7 @@ public class MvideoParser implements Parser {
 			List<String> imageLinks = transformData(reviewNode.get("photos"));
 			Integer likesCount = reviewNode.get("like").asInt();
 			Integer dislikesCount = reviewNode.get("dislike").asInt();
+			Integer score = reviewNode.get("score").asInt();
 
 			String format = "yyyy-mm-dd";
 			SimpleDateFormat sdf = new SimpleDateFormat(format);
@@ -1145,6 +1146,7 @@ public class MvideoParser implements Parser {
 			review.addImageLinks(imageLinks);
 			review.setLikesCount(likesCount);
 			review.setDislikesCount(dislikesCount);
+			review.setRating(score);
 
 			reviews.add(review);
 		});

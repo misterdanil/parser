@@ -51,6 +51,8 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 	private WebDriver webDriver;
 	private int times;
 	private boolean test = false;
+	
+	private int reviewPage = 1;
 
 	private static final Logger logger = LoggerFactory.getLogger(EldoradoSmartphoneParser.class);
 
@@ -666,7 +668,6 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 			return null;
 		}
 
-		int page = 1;
 		String link = resource.getLink();
 
 		Wrap wrap = new Wrap();
@@ -674,7 +675,7 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 		List<Review> reviews = new ArrayList<>();
 
 		while (wrap.isExist) {
-			webDriver.navigate().to(link + "/page/" + page + "/?show=response");
+			webDriver.navigate().to(link + "/page/" + reviewPage + "/?show=response");
 
 			WebDriverWait wdw = new WebDriverWait(webDriver, Duration.ofSeconds(20));
 			wdw.until(new Function<WebDriver, Boolean>() {
@@ -693,7 +694,11 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 								&& userReviews.get(0).findElements(By.className("usersReviewsListItem")).size() == 0) {
 							wrap.isExist = false;
 							wrap.result = Result.OK;
-						} else {
+						} else if (userReviews.size() == 0) {
+							return false;
+						} else if (userReviews.size() > 0
+								&& userReviews.get(0).findElements(By.className("usersReviewsListItem")).size() > 0) {
+							wrap.isExist = true;
 							wrap.result = Result.OK;
 						}
 
@@ -708,6 +713,12 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 				webDriver.manage().deleteAllCookies();
 				finishWebDriver();
 				createWebDriver();
+				try {
+					Thread.sleep(60000);
+				} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
 				times++;
 				test = test == false;
 				return getReviews(resource);
@@ -742,7 +753,13 @@ public class EldoradoSmartphoneParser extends AbstractSmartphoneParser {
 					reviews.add(review);
 				});
 
-				page++;
+				reviewPage++;
+				try {
+					Thread.sleep(3500);
+				} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
 			}
 		}
 		return reviews;
